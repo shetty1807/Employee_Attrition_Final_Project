@@ -78,7 +78,8 @@ st.markdown("""
 # ---------------------------------
 # PATHS
 # ---------------------------------
-BASE_DIR = Path(__file__).resolve().parent.parent
+CURRENT_FILE = Path(__file__).resolve()
+BASE_DIR = CURRENT_FILE.parent.parent
 
 DATA_PATH = BASE_DIR / "data" / "HR_Employee_Attrition.csv"
 MODEL_PATH = BASE_DIR / "saved_models" / "xgb_attrition_model.pkl"
@@ -86,6 +87,9 @@ COLUMNS_PATH = BASE_DIR / "saved_models" / "model_columns.pkl"
 METRICS_PATH = BASE_DIR / "saved_models" / "model_metrics.pkl"
 CONF_MATRIX_NPY_PATH = BASE_DIR / "saved_models" / "conf_matrix.npy"
 ACTION_TRACKER_PATH = BASE_DIR / "saved_models" / "hr_action_tracker.csv"
+PREDICTION_HISTORY_PATH = BASE_DIR / "saved_models" / "prediction_history.csv"
+
+ACTION_TRACKER_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 # ---------------------------------
 # LOAD FUNCTIONS
@@ -104,11 +108,20 @@ def load_data():
 
 @st.cache_data
 def load_metrics():
-    return joblib.load(METRICS_PATH)
+    if METRICS_PATH.exists():
+        return joblib.load(METRICS_PATH)
+    return {
+        "accuracy": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1_score": 0.0
+    }
 
 @st.cache_data
 def load_conf_matrix():
-    return np.load(CONF_MATRIX_NPY_PATH)
+    if CONF_MATRIX_NPY_PATH.exists():
+        return np.load(CONF_MATRIX_NPY_PATH)
+    return np.array([[0, 0], [0, 0]])
 
 # ---------------------------------
 # HELPER FUNCTIONS
@@ -160,52 +173,121 @@ def generate_ai_recommendations(
     num_companies_worked
 ):
     issues = []
-    recommendations = []
+    hr_actions = []
+    manager_actions = []
+    retention_plan = []
+    risk_score = 0
 
     if overtime == "Yes":
         issues.append("Employee is working overtime frequently.")
-        recommendations.append("Reduce overtime workload and monitor work pressure.")
+        hr_actions.append("Review workload policy and discuss burnout risk with HR.")
+        manager_actions.append("Reduce overtime burden and rebalance task allocation.")
+        risk_score += 2
 
     if job_satisfaction <= 2:
         issues.append("Job satisfaction is low.")
-        recommendations.append("Conduct HR discussion and improve role satisfaction.")
+        hr_actions.append("Schedule a retention discussion to understand dissatisfaction.")
+        manager_actions.append("Conduct a one-to-one meeting and improve role clarity.")
+        risk_score += 2
 
     if monthly_income < 4000:
         issues.append("Monthly income is comparatively low.")
-        recommendations.append("Review salary structure, incentives, and benefits.")
+        hr_actions.append("Review compensation, benefits, and retention incentives.")
+        manager_actions.append("Support compensation justification with performance context.")
+        risk_score += 1
 
     if work_life_balance <= 2:
         issues.append("Work-life balance is poor.")
-        recommendations.append("Provide flexible work policies or workload adjustment.")
+        hr_actions.append("Consider flexible work arrangements or wellbeing support.")
+        manager_actions.append("Adjust deadlines and reduce unnecessary pressure.")
+        risk_score += 2
 
     if training_times_last_year <= 1:
         issues.append("Employee has received limited training.")
-        recommendations.append("Provide more training and career development opportunities.")
+        hr_actions.append("Provide learning and development opportunities.")
+        manager_actions.append("Nominate the employee for technical or role-based training.")
+        risk_score += 1
 
     if years_since_last_promotion >= 5:
         issues.append("Employee has not been promoted for a long time.")
-        recommendations.append("Consider promotion planning or internal role growth.")
+        hr_actions.append("Review promotion eligibility and career growth opportunities.")
+        manager_actions.append("Discuss future growth path and internal mobility options.")
+        risk_score += 2
 
     if environment_satisfaction <= 2:
         issues.append("Work environment satisfaction is low.")
-        recommendations.append("Improve team culture, manager support, and workplace environment.")
+        hr_actions.append("Assess team culture and workplace concerns.")
+        manager_actions.append("Improve team engagement and manager support.")
+        risk_score += 2
 
     if distance_from_home >= 20:
         issues.append("Employee travels a long distance to work.")
-        recommendations.append("Consider transport support, hybrid work, or location flexibility.")
+        hr_actions.append("Consider transport support or flexible work options.")
+        manager_actions.append("Allow hybrid work where possible.")
+        risk_score += 1
 
     if num_companies_worked >= 5:
         issues.append("Employee has changed jobs frequently in the past.")
-        recommendations.append("Strengthen retention engagement and long-term career planning.")
+        hr_actions.append("Strengthen retention engagement and long-term career planning.")
+        manager_actions.append("Build stronger connection through frequent check-ins.")
+        risk_score += 1
 
     if not issues:
         issues.append("No major retention issues detected from the current profile.")
-        recommendations.append("Maintain employee engagement and continue regular support.")
+        hr_actions.append("Continue regular employee engagement and recognition.")
+        manager_actions.append("Maintain supportive management and periodic check-ins.")
+
+    hr_actions = list(dict.fromkeys(hr_actions))
+    manager_actions = list(dict.fromkeys(manager_actions))
+
+    if probability >= 0.80 or risk_score >= 8:
+        priority = "Critical"
+        confidence = "High"
+        retention_plan = [
+            "Within 48 hours: HR retention meeting",
+            "Within 3 days: Manager one-to-one discussion",
+            "Within 1 week: Workload / salary / promotion review",
+            "Within 2 weeks: Track improvement and follow-up action"
+        ]
+    elif probability >= 0.65 or risk_score >= 5:
+        priority = "High"
+        confidence = "High"
+        retention_plan = [
+            "Within 1 week: HR discussion",
+            "Within 1 week: Manager workload review",
+            "Within 2 weeks: Career growth or training plan",
+            "Within 1 month: Monitor retention signals"
+        ]
+    elif probability >= 0.35 or risk_score >= 3:
+        priority = "Medium"
+        confidence = "Medium"
+        retention_plan = [
+            "Within 2 weeks: Manager check-in",
+            "Within 2 weeks: Engagement review",
+            "Within 1 month: Training or wellbeing support",
+            "Monitor monthly for changes"
+        ]
+    else:
+        priority = "Low"
+        confidence = "Medium"
+        retention_plan = [
+            "Continue regular support",
+            "Maintain employee recognition",
+            "Review satisfaction periodically"
+        ]
+
+    main_reason = issues[0] if len(issues) > 0 else "No major issue identified."
+    secondary_reason = issues[1] if len(issues) > 1 else "No secondary issue identified."
 
     return {
-        "priority": priority_label(probability),
+        "priority": priority,
+        "confidence": confidence,
+        "main_reason": main_reason,
+        "secondary_reason": secondary_reason,
         "issues": issues,
-        "recommendations": recommendations
+        "hr_actions": hr_actions,
+        "manager_actions": manager_actions,
+        "retention_plan": retention_plan
     }
 
 def generate_risk_reasons(
@@ -285,6 +367,9 @@ def create_single_prediction_report(
     output.write(f"Predicted Attrition Probability: {probability:.4f}\n")
     output.write(f"Risk Level: {label}\n")
     output.write(f"Priority Level: {ai_result['priority']}\n")
+    output.write(f"Recommendation Confidence: {ai_result['confidence']}\n")
+    output.write(f"Main Reason: {ai_result['main_reason']}\n")
+    output.write(f"Secondary Reason: {ai_result['secondary_reason']}\n")
     output.write(f"Assigned HR Owner: {hr_owner}\n")
     output.write(f"Escalation Status: {escalation_status}\n\n")
 
@@ -298,10 +383,20 @@ def create_single_prediction_report(
     for issue in ai_result["issues"]:
         output.write(f"- {issue}\n")
 
-    output.write("\nRECOMMENDED HR ACTIONS\n")
-    output.write("-" * 24 + "\n")
-    for rec in ai_result["recommendations"]:
+    output.write("\nHR ACTIONS\n")
+    output.write("-" * 17 + "\n")
+    for rec in ai_result["hr_actions"]:
         output.write(f"- {rec}\n")
+
+    output.write("\nMANAGER ACTIONS\n")
+    output.write("-" * 17 + "\n")
+    for rec in ai_result["manager_actions"]:
+        output.write(f"- {rec}\n")
+
+    output.write("\nRETENTION PLAN\n")
+    output.write("-" * 17 + "\n")
+    for step in ai_result["retention_plan"]:
+        output.write(f"- {step}\n")
 
     output.write("\nEMPLOYEE INPUT SUMMARY\n")
     output.write("-" * 24 + "\n")
@@ -314,33 +409,47 @@ def create_pdf_report(employee_name, probability, risk_level, priority, hr_owner
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=15)
 
+    def clean_text(text):
+        if text is None:
+            return ""
+        text = str(text)
+        text = text.replace("–", "-").replace("—", "-").replace("’", "'").replace("“", '"').replace("”", '"')
+        return text.encode("latin-1", "replace").decode("latin-1")
+
     pdf.set_font("Arial", "B", 16)
-    pdf.cell(0, 10, "Employee Attrition Risk Report", ln=True, align="C")
+    pdf.cell(0, 10, clean_text("Employee Attrition Risk Report"), ln=True, align="C")
     pdf.ln(4)
 
     pdf.set_font("Arial", size=11)
-    pdf.cell(0, 8, f"Employee Name: {employee_name}", ln=True)
-    pdf.cell(0, 8, f"Attrition Probability: {probability:.2%}", ln=True)
-    pdf.cell(0, 8, f"Risk Level: {risk_level}", ln=True)
-    pdf.cell(0, 8, f"Priority: {priority}", ln=True)
-    pdf.cell(0, 8, f"HR Owner: {hr_owner}", ln=True)
-    pdf.cell(0, 8, f"Escalation Status: {escalation_status}", ln=True)
+    pdf.cell(0, 8, clean_text(f"Employee Name: {employee_name}"), ln=True)
+    pdf.cell(0, 8, clean_text(f"Attrition Probability: {probability:.2%}"), ln=True)
+    pdf.cell(0, 8, clean_text(f"Risk Level: {risk_level}"), ln=True)
+    pdf.cell(0, 8, clean_text(f"Priority: {priority}"), ln=True)
+    pdf.cell(0, 8, clean_text(f"HR Owner: {hr_owner}"), ln=True)
+    pdf.cell(0, 8, clean_text(f"Escalation Status: {escalation_status}"), ln=True)
     pdf.ln(4)
+
+    usable_width = 180
 
     pdf.set_font("Arial", "B", 12)
-    pdf.cell(0, 8, "Top Risk Reasons", ln=True)
+    pdf.cell(0, 8, clean_text("Top Risk Reasons"), ln=True)
     pdf.set_font("Arial", size=11)
     for _, reason_text in reasons:
-        pdf.multi_cell(0, 8, f"- {reason_text}")
+        pdf.multi_cell(usable_width, 8, clean_text(f"- {reason_text}"))
+        pdf.ln(1)
 
     pdf.ln(2)
     pdf.set_font("Arial", "B", 12)
-    pdf.cell(0, 8, "Recommended HR Actions", ln=True)
+    pdf.cell(0, 8, clean_text("Recommended Actions"), ln=True)
     pdf.set_font("Arial", size=11)
     for rec in recommendations:
-        pdf.multi_cell(0, 8, f"- {rec}")
+        pdf.multi_cell(usable_width, 8, clean_text(f"- {rec}"))
+        pdf.ln(1)
 
-    return bytes(pdf.output(dest="S"))
+    pdf_output = pdf.output(dest="S")
+    if isinstance(pdf_output, str):
+        return pdf_output.encode("latin-1", "replace")
+    return bytes(pdf_output)
 
 def send_email_alert(sender_email, sender_password, receiver_email, subject, body):
     try:
@@ -404,6 +513,111 @@ def save_action_tracker(tracker_df):
     ACTION_TRACKER_PATH.parent.mkdir(parents=True, exist_ok=True)
     tracker_df.to_csv(ACTION_TRACKER_PATH, index=False)
 
+def load_prediction_history():
+    if PREDICTION_HISTORY_PATH.exists():
+        return pd.read_csv(PREDICTION_HISTORY_PATH)
+    return pd.DataFrame(columns=[
+        "Employee Name",
+        "Probability",
+        "Risk Level",
+        "Priority",
+        "HR Owner",
+        "Timestamp"
+    ])
+
+def save_prediction_history(history_df):
+    PREDICTION_HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    history_df.to_csv(PREDICTION_HISTORY_PATH, index=False)
+
+def chatbot_response(user_query):
+    query = user_query.lower().strip()
+
+    if "attrition" in query:
+        return "Employee attrition means employees leaving the organization. This system predicts attrition risk and helps HR take preventive action."
+    elif "high risk" in query:
+        return "High Risk means the employee has a high probability of leaving the company. HR should review workload, job satisfaction, salary, promotion gap, and work-life balance."
+    elif "medium risk" in query:
+        return "Medium Risk means the employee may be at moderate risk of leaving. HR should monitor the employee and take supportive actions early."
+    elif "low risk" in query:
+        return "Low Risk means the employee currently shows stable retention signs. Regular support and engagement should continue."
+    elif "hr" in query or "what should hr do" in query:
+        return "HR should review employee satisfaction, overtime, salary, promotion opportunities, training, and manager support. The recommendation engine in this project helps with that."
+    elif "overtime" in query:
+        return "Frequent overtime may increase stress and burnout, which can raise attrition risk."
+    elif "salary" in query or "income" in query:
+        return "Low monthly income compared to workload or market expectation can reduce retention and increase attrition risk."
+    elif "promotion" in query:
+        return "A long gap since last promotion may reduce employee motivation and increase the chance of attrition."
+    elif "work life balance" in query or "work-life balance" in query:
+        return "Poor work-life balance is a major reason employees may leave. Flexible policies and workload control can help."
+    elif "bulk prediction" in query:
+        return "Bulk Prediction allows HR to upload a CSV file and predict attrition risk for many employees at once."
+    elif "action tracker" in query:
+        return "HR Action Tracker helps record follow-up actions, assign ownership, and update employee intervention status."
+    elif "shap" in query or "explainability" in query:
+        return "SHAP Explainability shows which features influenced the model prediction the most for a selected employee."
+    elif "dashboard" in query:
+        return "Dashboard Analytics shows attrition trends, department-wise patterns, overtime impact, and other useful visual insights."
+    elif "hello" in query or "hi" in query:
+        return "Hello! I am your HR Attrition Assistant. Ask me about attrition, risk levels, HR actions, bulk prediction, SHAP, or dashboard analytics."
+    else:
+        return "I can help with attrition, risk levels, HR actions, overtime, salary, promotions, dashboard analytics, SHAP explainability, bulk prediction, and action tracker."
+
+def build_dashboard_filtered_data(df):
+    filtered_df = df.copy()
+
+    department_options = ["All"] + sorted(df["Department"].dropna().astype(str).unique().tolist()) if "Department" in df.columns else ["All"]
+    attrition_options = ["All"] + sorted(df["Attrition"].dropna().astype(str).unique().tolist()) if "Attrition" in df.columns else ["All"]
+
+    selected_department = st.selectbox("Filter by Department", department_options)
+    selected_attrition = st.selectbox("Filter by Attrition", attrition_options)
+
+    if selected_department != "All" and "Department" in filtered_df.columns:
+        filtered_df = filtered_df[filtered_df["Department"].astype(str) == selected_department]
+
+    if selected_attrition != "All" and "Attrition" in filtered_df.columns:
+        filtered_df = filtered_df[filtered_df["Attrition"].astype(str) == selected_attrition]
+
+    return filtered_df
+
+def build_dashboard_risky_profiles(filtered_dashboard_df):
+    if "OverTime" in filtered_dashboard_df.columns and "JobSatisfaction" in filtered_dashboard_df.columns:
+        return filtered_dashboard_df[
+            (filtered_dashboard_df["OverTime"].astype(str) == "Yes") &
+            (filtered_dashboard_df["JobSatisfaction"] <= 2)
+        ].copy()
+    return pd.DataFrame()
+
+def add_dashboard_risky_to_tracker(risky_profiles_df):
+    if risky_profiles_df.empty:
+        return 0
+
+    tracker_df = load_action_tracker()
+    added_count = 0
+
+    for idx, row in risky_profiles_df.iterrows():
+        employee_name = row.get("EmployeeName", f"Employee_{idx+1}")
+        department = str(row.get("Department", "Unknown"))
+        risk_level = "High Risk"
+        probability = 0.80
+        hr_owner = assign_hr_owner(risk_level)
+
+        new_row = pd.DataFrame([{
+            "Employee Name": employee_name,
+            "Probability": probability,
+            "Risk Level": risk_level,
+            "Priority": "High",
+            "HR Owner": hr_owner,
+            "Status": "Pending"
+        }])
+
+        tracker_df = pd.concat([tracker_df, new_row], ignore_index=True)
+        added_count += 1
+
+    tracker_df = tracker_df.drop_duplicates(subset=["Employee Name"], keep="last")
+    save_action_tracker(tracker_df)
+    return added_count
+
 # ---------------------------------
 # FILE CHECK
 # ---------------------------------
@@ -415,15 +629,26 @@ if not MODEL_PATH.exists():
     missing_files.append(f"Model file missing: {MODEL_PATH}")
 if not COLUMNS_PATH.exists():
     missing_files.append(f"Columns file missing: {COLUMNS_PATH}")
-if not METRICS_PATH.exists():
-    missing_files.append(f"Metrics file missing: {METRICS_PATH}")
-if not CONF_MATRIX_NPY_PATH.exists():
-    missing_files.append(f"Confusion matrix file missing: {CONF_MATRIX_NPY_PATH}")
 
 if missing_files:
     st.error("Some required files are missing.")
     for item in missing_files:
         st.write("-", item)
+
+    st.info("Keep these files in your project like this:")
+    st.code(
+        """Employee_Attrition_Final_Project/
+├── app/
+│   └── app.py
+├── data/
+│   └── HR_Employee_Attrition.csv
+└── saved_models/
+    ├── xgb_attrition_model.pkl
+    ├── model_columns.pkl
+    ├── model_metrics.pkl
+    └── conf_matrix.npy""",
+        language="text"
+    )
     st.stop()
 
 # ---------------------------------
@@ -446,6 +671,12 @@ if "user_role" not in st.session_state:
 
 if "display_name" not in st.session_state:
     st.session_state.display_name = ""
+
+if "last_prediction" not in st.session_state:
+    st.session_state.last_prediction = None
+
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
 
 USERS = {
     "Admin": {
@@ -483,7 +714,6 @@ if not st.session_state.logged_in:
 
     if login_clicked:
         selected_user = USERS[role]
-
         if username == selected_user["username"] and password == selected_user["password"]:
             st.session_state.logged_in = True
             st.session_state.user_role = role
@@ -495,12 +725,6 @@ if not st.session_state.logged_in:
 
     st.info("Demo credentials: Admin/admin/1234, HR/hr/hr123, Manager/manager/mgr123")
     st.stop()
-
-# ---------------------------------
-# SESSION STATE
-# ---------------------------------
-if "last_prediction" not in st.session_state:
-    st.session_state.last_prediction = None
 
 # ---------------------------------
 # BASIC DATA PREP
@@ -547,10 +771,12 @@ if st.session_state.user_role == "Admin":
         "Model Comparison",
         "Model Performance",
         "Prediction",
+        "Prediction History",
         "Bulk Prediction",
         "HR Alert Center",
         "HR Action Tracker",
         "AI Recommendations",
+        "HR Chatbot",
         "Feature Importance",
         "SHAP Explainability"
     ]
@@ -558,15 +784,19 @@ elif st.session_state.user_role == "HR":
     menu_options = [
         "Dashboard Analytics",
         "Prediction",
+        "Prediction History",
         "Bulk Prediction",
         "HR Alert Center",
         "HR Action Tracker",
-        "AI Recommendations"
+        "AI Recommendations",
+        "HR Chatbot"
     ]
 elif st.session_state.user_role == "Manager":
     menu_options = [
         "Dashboard Analytics",
-        "Prediction"
+        "Prediction",
+        "Prediction History",
+        "HR Chatbot"
     ]
 else:
     menu_options = ["Dashboard Analytics"]
@@ -581,6 +811,8 @@ if st.sidebar.button("Logout"):
     st.session_state.logged_in = False
     st.session_state.user_role = ""
     st.session_state.display_name = ""
+    st.session_state.last_prediction = None
+    st.session_state.chat_history = []
     st.rerun()
 
 # ---------------------------------
@@ -614,7 +846,8 @@ if menu == "Project Overview":
             """
             To predict employee attrition using machine learning and support HR
             through risk prioritization, retention recommendations, alert notices,
-            email alerts, and action tracking.
+            email alerts, action tracking, prediction history, chatbot support,
+            and dashboard-based risky employee workflows.
             """
         )
 
@@ -623,7 +856,7 @@ if menu == "Project Overview":
             """
             Dataset → Data Cleaning → Encoding → Model Training →
             Prediction → Risk Prioritization → HR Recommendation →
-            HR Alert Notice Generation → Email / Action Tracking
+            HR Alert Notice Generation → Email / Action Tracking / History
             """
         )
         st.markdown("</div>", unsafe_allow_html=True)
@@ -642,11 +875,13 @@ if menu == "Project Overview":
 elif menu == "Dashboard Analytics":
     st.header("Dashboard Analytics")
 
+    filtered_dashboard_df = build_dashboard_filtered_data(df)
+
     high_risk_proxy = 0
-    if "OverTime" in df.columns and "JobSatisfaction" in df.columns:
-        high_risk_proxy = df[
-            (df["OverTime"].astype(str) == "Yes") &
-            (df["JobSatisfaction"] <= 2)
+    if "OverTime" in filtered_dashboard_df.columns and "JobSatisfaction" in filtered_dashboard_df.columns:
+        high_risk_proxy = filtered_dashboard_df[
+            (filtered_dashboard_df["OverTime"].astype(str) == "Yes") &
+            (filtered_dashboard_df["JobSatisfaction"] <= 2)
         ].shape[0]
 
     c1, c2, c3, c4 = st.columns(4)
@@ -659,8 +894,8 @@ elif menu == "Dashboard Analytics":
     col1, col2 = st.columns(2)
 
     with col1:
-        if "Department" in df.columns and "Attrition" in df.columns:
-            dept_attrition = pd.crosstab(df["Department"], df["Attrition"])
+        if "Department" in filtered_dashboard_df.columns and "Attrition" in filtered_dashboard_df.columns:
+            dept_attrition = pd.crosstab(filtered_dashboard_df["Department"], filtered_dashboard_df["Attrition"])
             fig, ax = plt.subplots(figsize=(7, 4))
             dept_attrition.plot(kind="bar", ax=ax)
             ax.set_title("Department-wise Attrition")
@@ -670,8 +905,8 @@ elif menu == "Dashboard Analytics":
             st.pyplot(fig)
 
     with col2:
-        if "OverTime" in df.columns and "Attrition" in df.columns:
-            overtime_attrition = pd.crosstab(df["OverTime"], df["Attrition"])
+        if "OverTime" in filtered_dashboard_df.columns and "Attrition" in filtered_dashboard_df.columns:
+            overtime_attrition = pd.crosstab(filtered_dashboard_df["OverTime"], filtered_dashboard_df["Attrition"])
             fig, ax = plt.subplots(figsize=(7, 4))
             overtime_attrition.plot(kind="bar", ax=ax)
             ax.set_title("OverTime vs Attrition")
@@ -683,17 +918,17 @@ elif menu == "Dashboard Analytics":
     col3, col4 = st.columns(2)
 
     with col3:
-        if "JobRole" in df.columns:
+        if "JobRole" in filtered_dashboard_df.columns:
             plot_bar_chart(
-                df["JobRole"].value_counts().head(10),
+                filtered_dashboard_df["JobRole"].value_counts().head(10),
                 "Top Job Roles Distribution",
                 "Job Role",
                 "Count"
             )
 
     with col4:
-        if "WorkLifeBalance" in df.columns and "Attrition" in df.columns:
-            wlb_attrition = pd.crosstab(df["WorkLifeBalance"], df["Attrition"])
+        if "WorkLifeBalance" in filtered_dashboard_df.columns and "Attrition" in filtered_dashboard_df.columns:
+            wlb_attrition = pd.crosstab(filtered_dashboard_df["WorkLifeBalance"], filtered_dashboard_df["Attrition"])
             fig, ax = plt.subplots(figsize=(7, 4))
             wlb_attrition.plot(kind="bar", ax=ax)
             ax.set_title("Work-Life Balance vs Attrition")
@@ -701,6 +936,39 @@ elif menu == "Dashboard Analytics":
             ax.set_ylabel("Count")
             plt.xticks(rotation=0)
             st.pyplot(fig)
+
+    risky_profiles = build_dashboard_risky_profiles(filtered_dashboard_df)
+
+    st.subheader("Auto High-Risk Alert Section")
+
+    if risky_profiles.empty:
+        st.info("No risky employees found for the current dashboard filters.")
+    else:
+        st.warning(f"Found {len(risky_profiles)} potentially risky employees based on overtime + low job satisfaction.")
+
+        st.subheader("Potential Risky Employees")
+        st.dataframe(risky_profiles.head(10), use_container_width=True)
+
+        st.download_button(
+            label="Download Risky Employees Report",
+            data=risky_profiles.to_csv(index=False).encode("utf-8"),
+            file_name="dashboard_risky_employees.csv",
+            mime="text/csv"
+        )
+
+        if st.button("Add Risky Employees to HR Action Tracker"):
+            added_count = add_dashboard_risky_to_tracker(risky_profiles)
+            st.success(f"{added_count} risky employees were added to HR Action Tracker.")
+
+    st.subheader("Filtered Employee Data")
+    st.dataframe(filtered_dashboard_df, use_container_width=True)
+
+    st.download_button(
+        label="Download Filtered Dashboard Data",
+        data=filtered_dashboard_df.to_csv(index=False).encode("utf-8"),
+        file_name="filtered_dashboard_data.csv",
+        mime="text/csv"
+    )
 
 # ---------------------------------
 # PAGE 3: DATASET INSIGHTS
@@ -804,10 +1072,10 @@ elif menu == "Model Performance":
     st.header("Model Performance")
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Accuracy", f"{metrics['accuracy']:.2f}")
-    c2.metric("Precision", f"{metrics['precision']:.2f}")
-    c3.metric("Recall", f"{metrics['recall']:.2f}")
-    c4.metric("F1 Score", f"{metrics['f1_score']:.2f}")
+    c1.metric("Accuracy", f"{metrics.get('accuracy', 0):.2f}")
+    c2.metric("Precision", f"{metrics.get('precision', 0):.2f}")
+    c3.metric("Recall", f"{metrics.get('recall', 0):.2f}")
+    c4.metric("F1 Score", f"{metrics.get('f1_score', 0):.2f}")
 
     st.subheader("Confusion Matrix")
 
@@ -996,12 +1264,14 @@ elif menu == "Prediction":
         hr_owner = assign_hr_owner(label)
         escalation_status = escalation_flag(probability, overtime, job_satisfaction, work_life_balance)
 
+        all_recommendations = ai_result["hr_actions"] + ai_result["manager_actions"]
+
         hr_notice = generate_hr_notice(
             employee_name=employee_name,
             probability=probability,
             risk_level=label,
             issues=ai_result["issues"],
-            recommendations=ai_result["recommendations"]
+            recommendations=all_recommendations
         )
 
         st.session_state.last_prediction = {
@@ -1031,6 +1301,12 @@ elif menu == "Prediction":
         st.progress(float(probability))
         st.info(f"Escalation Status: {escalation_status}")
 
+        st.subheader("Risk Summary")
+        st.write(f"**Priority:** {ai_result['priority']}")
+        st.write(f"**Recommendation Confidence:** {ai_result['confidence']}")
+        st.write(f"**Main Reason:** {ai_result['main_reason']}")
+        st.write(f"**Secondary Reason:** {ai_result['secondary_reason']}")
+
         st.subheader("Top Reasons for Risk")
         reasons_df = pd.DataFrame(reasons, columns=["Factor", "Why it matters"])
         st.dataframe(reasons_df, use_container_width=True)
@@ -1039,9 +1315,17 @@ elif menu == "Prediction":
         for issue in ai_result["issues"]:
             st.write(f"- {issue}")
 
-        st.subheader("Recommended HR Actions")
-        for rec in ai_result["recommendations"]:
+        st.subheader("HR Actions")
+        for rec in ai_result["hr_actions"]:
             st.write(f"- {rec}")
+
+        st.subheader("Manager Actions")
+        for rec in ai_result["manager_actions"]:
+            st.write(f"- {rec}")
+
+        st.subheader("Retention Plan")
+        for step in ai_result["retention_plan"]:
+            st.write(f"- {step}")
 
         st.subheader("Generated HR Notice")
         st.markdown('<div class="notice-box">', unsafe_allow_html=True)
@@ -1090,7 +1374,7 @@ elif menu == "Prediction":
             hr_owner=hr_owner,
             escalation_status=escalation_status,
             reasons=reasons,
-            recommendations=ai_result["recommendations"]
+            recommendations=all_recommendations
         )
 
         st.download_button(
@@ -1125,6 +1409,18 @@ elif menu == "Prediction":
         tracker_df = tracker_df.drop_duplicates(subset=["Employee Name"], keep="last")
         save_action_tracker(tracker_df)
 
+        history_df = load_prediction_history()
+        history_row = pd.DataFrame([{
+            "Employee Name": employee_name,
+            "Probability": round(probability, 4),
+            "Risk Level": label,
+            "Priority": ai_result["priority"],
+            "HR Owner": hr_owner,
+            "Timestamp": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+        }])
+        history_df = pd.concat([history_df, history_row], ignore_index=True)
+        save_prediction_history(history_df)
+
     st.subheader("Optional Email Alert to HR")
     st.markdown('<div class="email-box">', unsafe_allow_html=True)
     sender_email = st.text_input("Sender Gmail")
@@ -1134,6 +1430,8 @@ elif menu == "Prediction":
     if st.button("Send Email Alert to HR"):
         if st.session_state.last_prediction is None:
             st.warning("Please run a prediction first.")
+        elif not sender_email or not sender_password or not receiver_email:
+            st.warning("Please fill all email fields.")
         else:
             subject = f"Employee Attrition Alert - {st.session_state.last_prediction['employee_name']}"
             success, message = send_email_alert(
@@ -1147,10 +1445,32 @@ elif menu == "Prediction":
                 st.success(message)
             else:
                 st.error(message)
+
     st.markdown("</div>", unsafe_allow_html=True)
 
 # ---------------------------------
-# PAGE 7: BULK PREDICTION
+# PAGE 7: PREDICTION HISTORY
+# ---------------------------------
+elif menu == "Prediction History":
+    st.header("Prediction History")
+
+    history_df = load_prediction_history()
+
+    if history_df.empty:
+        st.info("No prediction history available yet.")
+    else:
+        st.subheader("Saved Predictions")
+        st.dataframe(history_df, use_container_width=True)
+
+        st.download_button(
+            label="Download Prediction History",
+            data=history_df.to_csv(index=False).encode("utf-8"),
+            file_name="prediction_history.csv",
+            mime="text/csv"
+        )
+
+# ---------------------------------
+# PAGE 8: BULK PREDICTION
 # ---------------------------------
 elif menu == "Bulk Prediction":
     st.header("Bulk CSV Prediction")
@@ -1162,78 +1482,81 @@ elif menu == "Bulk Prediction":
         st.subheader("Uploaded Data Preview")
         st.dataframe(bulk_df_raw.head(), use_container_width=True)
 
-        original_bulk_df = bulk_df_raw.copy()
-        bulk_df = preprocess_bulk_data(bulk_df_raw.copy(), model_columns)
+        try:
+            original_bulk_df = bulk_df_raw.copy()
+            bulk_df = preprocess_bulk_data(bulk_df_raw.copy(), model_columns)
 
-        predictions = model.predict(bulk_df)
-        probabilities = model.predict_proba(bulk_df)[:, 1]
+            predictions = model.predict(bulk_df)
+            probabilities = model.predict_proba(bulk_df)[:, 1]
 
-        original_bulk_df["Predicted_Attrition"] = predictions
-        original_bulk_df["Attrition_Probability"] = probabilities
-        original_bulk_df["Risk_Level"] = original_bulk_df["Attrition_Probability"].apply(risk_label)
+            original_bulk_df["Predicted_Attrition"] = predictions
+            original_bulk_df["Attrition_Probability"] = probabilities
+            original_bulk_df["Risk_Level"] = original_bulk_df["Attrition_Probability"].apply(risk_label)
 
-        def bulk_recommendation(row):
-            recs = []
-            if row.get("OverTime", "") == "Yes":
-                recs.append("Reduce overtime")
-            if row.get("JobSatisfaction", 4) <= 2:
-                recs.append("Improve job satisfaction")
-            if row.get("MonthlyIncome", 99999) < 4000:
-                recs.append("Review salary")
-            if row.get("WorkLifeBalance", 4) <= 2:
-                recs.append("Improve work-life balance")
-            if row.get("TrainingTimesLastYear", 5) <= 1:
-                recs.append("Provide training")
-            if not recs:
-                recs.append("Maintain engagement")
-            return ", ".join(recs)
+            def bulk_recommendation(row):
+                recs = []
+                if row.get("OverTime", "") == "Yes":
+                    recs.append("Reduce overtime")
+                if row.get("JobSatisfaction", 4) <= 2:
+                    recs.append("Improve job satisfaction")
+                if row.get("MonthlyIncome", 99999) < 4000:
+                    recs.append("Review salary")
+                if row.get("WorkLifeBalance", 4) <= 2:
+                    recs.append("Improve work-life balance")
+                if row.get("TrainingTimesLastYear", 5) <= 1:
+                    recs.append("Provide training")
+                if not recs:
+                    recs.append("Maintain engagement")
+                return ", ".join(recs)
 
-        original_bulk_df["Suggested_Action"] = original_bulk_df.apply(bulk_recommendation, axis=1)
+            original_bulk_df["Suggested_Action"] = original_bulk_df.apply(bulk_recommendation, axis=1)
 
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Total Employees", len(original_bulk_df))
-        c2.metric("Low Risk", int((original_bulk_df["Risk_Level"] == "Low Risk").sum()))
-        c3.metric("Medium Risk", int((original_bulk_df["Risk_Level"] == "Medium Risk").sum()))
-        c4.metric("High Risk", int((original_bulk_df["Risk_Level"] == "High Risk").sum()))
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Total Employees", len(original_bulk_df))
+            c2.metric("Low Risk", int((original_bulk_df["Risk_Level"] == "Low Risk").sum()))
+            c3.metric("Medium Risk", int((original_bulk_df["Risk_Level"] == "Medium Risk").sum()))
+            c4.metric("High Risk", int((original_bulk_df["Risk_Level"] == "High Risk").sum()))
 
-        st.subheader("Risk Summary")
-        risk_counts = original_bulk_df["Risk_Level"].value_counts()
-        fig, ax = plt.subplots(figsize=(6, 4))
-        risk_counts.plot(kind="bar", ax=ax)
-        ax.set_title("Bulk Risk Distribution")
-        ax.set_xlabel("Risk Level")
-        ax.set_ylabel("Count")
-        plt.xticks(rotation=0)
-        st.pyplot(fig)
+            st.subheader("Risk Summary")
+            risk_counts = original_bulk_df["Risk_Level"].value_counts()
+            fig, ax = plt.subplots(figsize=(6, 4))
+            risk_counts.plot(kind="bar", ax=ax)
+            ax.set_title("Bulk Risk Distribution")
+            ax.set_xlabel("Risk Level")
+            ax.set_ylabel("Count")
+            plt.xticks(rotation=0)
+            st.pyplot(fig)
 
-        st.subheader("Top High-Risk Employees")
-        high_risk_df = original_bulk_df.sort_values(by="Attrition_Probability", ascending=False).head(10)
-        st.dataframe(high_risk_df, use_container_width=True)
+            st.subheader("Top High-Risk Employees")
+            high_risk_df = original_bulk_df.sort_values(by="Attrition_Probability", ascending=False).head(10)
+            st.dataframe(high_risk_df, use_container_width=True)
 
-        selected_risk = st.selectbox("Filter by Risk Level", ["All", "High Risk", "Medium Risk", "Low Risk"])
-        filtered_df = original_bulk_df.copy()
-        if selected_risk != "All":
-            filtered_df = filtered_df[filtered_df["Risk_Level"] == selected_risk]
+            selected_risk = st.selectbox("Filter by Risk Level", ["All", "High Risk", "Medium Risk", "Low Risk"])
+            filtered_df = original_bulk_df.copy()
+            if selected_risk != "All":
+                filtered_df = filtered_df[filtered_df["Risk_Level"] == selected_risk]
 
-        st.subheader("Prediction Results")
-        st.dataframe(filtered_df, use_container_width=True)
+            st.subheader("Prediction Results")
+            st.dataframe(filtered_df, use_container_width=True)
 
-        st.download_button(
-            label="Download Filtered Prediction Results",
-            data=filtered_df.to_csv(index=False).encode("utf-8"),
-            file_name="bulk_attrition_predictions.csv",
-            mime="text/csv"
-        )
+            st.download_button(
+                label="Download Filtered Prediction Results",
+                data=filtered_df.to_csv(index=False).encode("utf-8"),
+                file_name="bulk_attrition_predictions.csv",
+                mime="text/csv"
+            )
 
-        st.download_button(
-            label="Download High-Risk Employees Only",
-            data=original_bulk_df[original_bulk_df["Risk_Level"] == "High Risk"].to_csv(index=False).encode("utf-8"),
-            file_name="high_risk_employees.csv",
-            mime="text/csv"
-        )
+            st.download_button(
+                label="Download High-Risk Employees Only",
+                data=original_bulk_df[original_bulk_df["Risk_Level"] == "High Risk"].to_csv(index=False).encode("utf-8"),
+                file_name="high_risk_employees.csv",
+                mime="text/csv"
+            )
+        except Exception as e:
+            st.error(f"Bulk prediction failed: {e}")
 
 # ---------------------------------
-# PAGE 8: HR ALERT CENTER
+# PAGE 9: HR ALERT CENTER
 # ---------------------------------
 elif menu == "HR Alert Center":
     st.header("HR Alert Center")
@@ -1242,106 +1565,112 @@ elif menu == "HR Alert Center":
 
     if uploaded_file is not None:
         bulk_df_raw = pd.read_csv(uploaded_file)
-        original_bulk_df = bulk_df_raw.copy()
-        bulk_df = preprocess_bulk_data(bulk_df_raw.copy(), model_columns)
 
-        probabilities = model.predict_proba(bulk_df)[:, 1]
-        predictions = model.predict(bulk_df)
+        try:
+            original_bulk_df = bulk_df_raw.copy()
+            bulk_df = preprocess_bulk_data(bulk_df_raw.copy(), model_columns)
 
-        original_bulk_df["Predicted_Attrition"] = predictions
-        original_bulk_df["Attrition_Probability"] = probabilities
-        original_bulk_df["Risk_Level"] = original_bulk_df["Attrition_Probability"].apply(risk_label)
-        original_bulk_df["Priority"] = original_bulk_df["Attrition_Probability"].apply(priority_label)
-        original_bulk_df["HR_Owner"] = original_bulk_df["Risk_Level"].apply(assign_hr_owner)
+            probabilities = model.predict_proba(bulk_df)[:, 1]
+            predictions = model.predict(bulk_df)
 
-        def build_alert(row):
-            overtime_val = row.get("OverTime", "No")
-            job_sat = row.get("JobSatisfaction", 4)
-            income = row.get("MonthlyIncome", 5000)
-            work_life = row.get("WorkLifeBalance", 4)
-            training = row.get("TrainingTimesLastYear", 2)
-            promotion_gap = row.get("YearsSinceLastPromotion", 0)
-            env_sat = row.get("EnvironmentSatisfaction", 4)
-            dist = row.get("DistanceFromHome", 5)
-            companies = row.get("NumCompaniesWorked", 1)
+            original_bulk_df["Predicted_Attrition"] = predictions
+            original_bulk_df["Attrition_Probability"] = probabilities
+            original_bulk_df["Risk_Level"] = original_bulk_df["Attrition_Probability"].apply(risk_label)
+            original_bulk_df["Priority"] = original_bulk_df["Attrition_Probability"].apply(priority_label)
+            original_bulk_df["HR_Owner"] = original_bulk_df["Risk_Level"].apply(assign_hr_owner)
 
-            ai_result = generate_ai_recommendations(
-                probability=row["Attrition_Probability"],
-                overtime=overtime_val,
-                job_satisfaction=job_sat,
-                monthly_income=income,
-                work_life_balance=work_life,
-                training_times_last_year=training,
-                years_since_last_promotion=promotion_gap,
-                environment_satisfaction=env_sat,
-                distance_from_home=dist,
-                num_companies_worked=companies
+            def build_alert(row):
+                overtime_val = row.get("OverTime", "No")
+                job_sat = row.get("JobSatisfaction", 4)
+                income = row.get("MonthlyIncome", 5000)
+                work_life = row.get("WorkLifeBalance", 4)
+                training = row.get("TrainingTimesLastYear", 2)
+                promotion_gap = row.get("YearsSinceLastPromotion", 0)
+                env_sat = row.get("EnvironmentSatisfaction", 4)
+                dist = row.get("DistanceFromHome", 5)
+                companies = row.get("NumCompaniesWorked", 1)
+
+                ai_result = generate_ai_recommendations(
+                    probability=row["Attrition_Probability"],
+                    overtime=overtime_val,
+                    job_satisfaction=job_sat,
+                    monthly_income=income,
+                    work_life_balance=work_life,
+                    training_times_last_year=training,
+                    years_since_last_promotion=promotion_gap,
+                    environment_satisfaction=env_sat,
+                    distance_from_home=dist,
+                    num_companies_worked=companies
+                )
+
+                emp_name = row.get("EmployeeName", f"Employee_{row.name + 1}")
+                all_recommendations = ai_result["hr_actions"] + ai_result["manager_actions"]
+
+                return generate_hr_notice(
+                    employee_name=emp_name,
+                    probability=row["Attrition_Probability"],
+                    risk_level=row["Risk_Level"],
+                    issues=ai_result["issues"],
+                    recommendations=all_recommendations
+                )
+
+            original_bulk_df["Escalation_Status"] = original_bulk_df.apply(
+                lambda row: escalation_flag(
+                    row["Attrition_Probability"],
+                    row.get("OverTime", "No"),
+                    row.get("JobSatisfaction", 4),
+                    row.get("WorkLifeBalance", 4),
+                ),
+                axis=1
             )
 
-            emp_name = row.get("EmployeeName", f"Employee_{row.name + 1}")
+            original_bulk_df["HR_Notice"] = original_bulk_df.apply(build_alert, axis=1)
 
-            return generate_hr_notice(
-                employee_name=emp_name,
-                probability=row["Attrition_Probability"],
-                risk_level=row["Risk_Level"],
-                issues=ai_result["issues"],
-                recommendations=ai_result["recommendations"]
+            attention_df = original_bulk_df[
+                original_bulk_df["Risk_Level"].isin(["High Risk", "Medium Risk"])
+            ].sort_values(by="Attrition_Probability", ascending=False)
+
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Total Alerts", len(attention_df))
+            c2.metric("High Risk Alerts", int((attention_df["Risk_Level"] == "High Risk").sum()))
+            c3.metric("Critical Priority", int((attention_df["Priority"] == "Critical").sum()))
+            c4.metric("Escalate Immediately", int((attention_df["Escalation_Status"] == "Escalate Immediately").sum()))
+
+            st.subheader("Critical Employee Watchlist")
+            watchlist_cols = [col for col in [
+                "EmployeeName", "Attrition_Probability", "Risk_Level",
+                "Priority", "HR_Owner", "Escalation_Status"
+            ] if col in attention_df.columns]
+
+            if not watchlist_cols:
+                watchlist_cols = ["Attrition_Probability", "Risk_Level", "Priority", "HR_Owner", "Escalation_Status"]
+
+            st.dataframe(attention_df[watchlist_cols], use_container_width=True)
+
+            if not attention_df.empty:
+                st.subheader("Generated HR Notices")
+                selected_index = st.selectbox("Select employee row to view HR notice", attention_df.index.tolist())
+                selected_row = attention_df.loc[selected_index]
+                st.text_area("Generated HR Notice", selected_row["HR_Notice"], height=280)
+
+                st.download_button(
+                    label="Download Selected HR Notice",
+                    data=selected_row["HR_Notice"],
+                    file_name="selected_hr_notice.txt",
+                    mime="text/plain"
+                )
+
+            st.download_button(
+                label="Download HR Alert Report",
+                data=attention_df.to_csv(index=False).encode("utf-8"),
+                file_name="hr_alert_report.csv",
+                mime="text/csv"
             )
-
-        original_bulk_df["Escalation_Status"] = original_bulk_df.apply(
-            lambda row: escalation_flag(
-                row["Attrition_Probability"],
-                row.get("OverTime", "No"),
-                row.get("JobSatisfaction", 4),
-                row.get("WorkLifeBalance", 4),
-            ),
-            axis=1
-        )
-
-        original_bulk_df["HR_Notice"] = original_bulk_df.apply(build_alert, axis=1)
-
-        attention_df = original_bulk_df[
-            original_bulk_df["Risk_Level"].isin(["High Risk", "Medium Risk"])
-        ].sort_values(by="Attrition_Probability", ascending=False)
-
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Total Alerts", len(attention_df))
-        c2.metric("High Risk Alerts", int((attention_df["Risk_Level"] == "High Risk").sum()))
-        c3.metric("Critical Priority", int((attention_df["Priority"] == "Critical").sum()))
-        c4.metric("Escalate Immediately", int((attention_df["Escalation_Status"] == "Escalate Immediately").sum()))
-
-        st.subheader("Critical Employee Watchlist")
-        watchlist_cols = [col for col in [
-            "EmployeeName", "Attrition_Probability", "Risk_Level",
-            "Priority", "HR_Owner", "Escalation_Status"
-        ] if col in attention_df.columns]
-
-        if not watchlist_cols:
-            watchlist_cols = ["Attrition_Probability", "Risk_Level", "Priority", "HR_Owner", "Escalation_Status"]
-
-        st.dataframe(attention_df[watchlist_cols], use_container_width=True)
-
-        st.subheader("Generated HR Notices")
-        selected_index = st.selectbox("Select employee row to view HR notice", attention_df.index.tolist())
-        selected_row = attention_df.loc[selected_index]
-        st.text_area("Generated HR Notice", selected_row["HR_Notice"], height=280)
-
-        st.download_button(
-            label="Download Selected HR Notice",
-            data=selected_row["HR_Notice"],
-            file_name="selected_hr_notice.txt",
-            mime="text/plain"
-        )
-
-        st.download_button(
-            label="Download HR Alert Report",
-            data=attention_df.to_csv(index=False).encode("utf-8"),
-            file_name="hr_alert_report.csv",
-            mime="text/csv"
-        )
+        except Exception as e:
+            st.error(f"HR alert generation failed: {e}")
 
 # ---------------------------------
-# PAGE 9: HR ACTION TRACKER
+# PAGE 10: HR ACTION TRACKER
 # ---------------------------------
 elif menu == "HR Action Tracker":
     st.header("HR Action Tracker")
@@ -1366,13 +1695,13 @@ elif menu == "HR Action Tracker":
 
         st.download_button(
             label="Download HR Action Tracker",
-            data=tracker_df.to_csv(index=False),
+            data=tracker_df.to_csv(index=False).encode("utf-8"),
             file_name="hr_action_tracker.csv",
             mime="text/csv"
         )
 
 # ---------------------------------
-# PAGE 10: AI RECOMMENDATIONS
+# PAGE 11: AI RECOMMENDATIONS
 # ---------------------------------
 elif menu == "AI Recommendations":
     st.header("AI-Based Recommendation Engine")
@@ -1401,7 +1730,30 @@ elif menu == "AI Recommendations":
     st.info("This makes the system stronger because it not only predicts attrition, but also recommends preventive actions for HR teams.")
 
 # ---------------------------------
-# PAGE 11: FEATURE IMPORTANCE
+# PAGE 12: HR CHATBOT
+# ---------------------------------
+elif menu == "HR Chatbot":
+    st.header("HR Chatbot Assistant")
+    st.write("Ask questions about attrition, HR actions, dashboard, SHAP, or employee risk.")
+
+    user_query = st.text_input("Type your question here")
+
+    if st.button("Ask Chatbot"):
+        if user_query.strip():
+            bot_reply = chatbot_response(user_query)
+            st.session_state.chat_history.append(("You", user_query))
+            st.session_state.chat_history.append(("Bot", bot_reply))
+
+    if st.session_state.chat_history:
+        st.subheader("Chat History")
+        for sender, message in reversed(st.session_state.chat_history):
+            if sender == "You":
+                st.markdown(f"**🧑 You:** {message}")
+            else:
+                st.markdown(f"**🤖 Bot:** {message}")
+
+# ---------------------------------
+# PAGE 13: FEATURE IMPORTANCE
 # ---------------------------------
 elif menu == "Feature Importance":
     st.header("Feature Importance")
@@ -1424,7 +1776,7 @@ elif menu == "Feature Importance":
         st.warning("Feature importance not available for this model.")
 
 # ---------------------------------
-# PAGE 12: SHAP EXPLAINABILITY
+# PAGE 14: SHAP EXPLAINABILITY
 # ---------------------------------
 elif menu == "SHAP Explainability":
     st.header("SHAP Explainability")
@@ -1445,7 +1797,11 @@ elif menu == "SHAP Explainability":
         num_companies_worked = st.slider("Num Companies Worked", 0, 10, 2, key="shap_companies")
 
     if st.button("Explain Prediction"):
-        import shap
+        try:
+            import shap
+        except Exception:
+            st.error("SHAP is not installed. Run: pip install shap")
+            st.stop()
 
         input_dict = {
             "Age": age,

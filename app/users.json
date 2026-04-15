@@ -1,0 +1,14 @@
+{
+    "admin": {
+        "password": "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9",
+        "role": "Admin"
+    },
+    "hr": {
+        "password": "070a3b5e8d4bd5c46acccb91c9c54614c0cd649e78c4c4719e3a64270bae5ddf",
+        "role": "HR"
+    },
+    "manager": {
+        "password": "866485796cfa8d7c0cf7111640205b83076433547577511d81f8030ae99ecea5",
+        "role": "Manager"
+    }
+}
